@@ -1,0 +1,360 @@
+// SIGAV — Sistema Integrado de Gestión de Atención al Vecino
+// Municipalidad de Guatemala
+// Basado en el Diccionario de Datos y Diagrama de Clases del proyecto
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum RolUsuario {
+  VECINO
+  AGENTE
+  SUPERVISOR
+  ADMIN
+}
+
+enum EstadoTicket {
+  ABIERTO
+  EN_PROGRESO
+  CERRADO
+  ESCALADO
+}
+
+enum PrioridadTicket {
+  BAJA
+  MEDIA
+  ALTA
+  CRITICA
+}
+
+enum CanalAtencion {
+  PRESENCIAL
+  TELEFONO
+  CORREO
+  REDES_SOCIALES
+  PORTAL_WEB
+}
+
+enum TipoInteraccion {
+  TICKET
+  CHAT
+  CORREO
+  RED_SOCIAL
+  LLAMADA
+}
+
+// ─────────────────────────────────────────────
+// USUARIO (tabla raíz — herencia por tabla por subtipo)
+// ─────────────────────────────────────────────
+
+model Usuario {
+  id              Int          @id @default(autoincrement())
+  nombre          String       @db.VarChar(150)
+  correo          String       @unique @db.VarChar(200)
+  contrasenaHash  String       @map("contrasena_hash") @db.VarChar(255)
+  rol             RolUsuario
+  activo          Boolean      @default(true)
+  creadoEn        DateTime     @default(now()) @map("creado_en") @db.Timestamptz
+  actualizadoEn   DateTime     @updatedAt @map("actualizado_en") @db.Timestamptz
+
+  // Subtipos (relación 1:1)
+  vecino          Vecino?
+  agente          Agente?
+  supervisor      Supervisor?
+
+  // NextAuth (sesiones)
+  accounts        Account[]
+  sessions        Session[]
+
+  @@map("usuario")
+}
+
+// ─────────────────────────────────────────────
+// VECINO — subclase de Usuario
+// ─────────────────────────────────────────────
+
+model Vecino {
+  idUsuario   Int      @id @map("id_usuario")
+  dpi         String   @unique @db.VarChar(13)
+  telefono    String?  @db.VarChar(15)
+  zona        String   @db.VarChar(10)
+
+  usuario     Usuario  @relation(fields: [idUsuario], references: [id], onDelete: Cascade)
+  tickets     Ticket[]
+  historial   HistorialVecino?
+
+  @@map("vecino")
+}
+
+// ─────────────────────────────────────────────
+// AGENTE — subclase de Usuario
+// ─────────────────────────────────────────────
+
+model Agente {
+  idUsuario    Int     @id @map("id_usuario")
+  especialidad String  @db.VarChar(100)
+  disponible   Boolean @default(true)
+  cargaActual  Int     @default(0) @map("carga_actual")
+
+  usuario      Usuario  @relation(fields: [idUsuario], references: [id], onDelete: Cascade)
+  tickets      Ticket[]
+  supervisores SupervisorAgente[] @relation("AgenteEquipo")
+
+  @@map("agente")
+}
+
+// ─────────────────────────────────────────────
+// SUPERVISOR — subclase de Usuario
+// ─────────────────────────────────────────────
+
+model Supervisor {
+  idUsuario    Int    @id @map("id_usuario")
+  departamento String @db.VarChar(100)
+  nivelAcceso  Int    @default(1) @map("nivel_acceso") @db.SmallInt
+
+  usuario          Usuario            @relation(fields: [idUsuario], references: [id], onDelete: Cascade)
+  agentes          SupervisorAgente[] @relation("SupervisorEquipo")
+  ticketsEscalados Ticket[]           @relation("TicketEscalado")
+
+  @@map("supervisor")
+}
+
+// Tabla N:M Supervisor ↔ Agente (equipo asignado)
+model SupervisorAgente {
+  idSupervisor Int @map("id_supervisor")
+  idAgente     Int @map("id_agente")
+
+  supervisor   Supervisor @relation("SupervisorEquipo", fields: [idSupervisor], references: [idUsuario])
+  agente       Agente     @relation("AgenteEquipo", fields: [idAgente], references: [idUsuario])
+
+  @@id([idSupervisor, idAgente])
+  @@map("supervisor_agente")
+}
+
+// ─────────────────────────────────────────────
+// TICKET — entidad central del sistema
+// ─────────────────────────────────────────────
+
+model Ticket {
+  id            Int              @id @default(autoincrement()) @map("id_ticket")
+  codigo        String           @unique @db.VarChar(20)   // TKT-00000001 (generado en app)
+  idVecino      Int              @map("id_vecino")
+  idAgente      Int?             @map("id_agente")
+  estado        EstadoTicket     @default(ABIERTO)
+  prioridad     PrioridadTicket  @default(MEDIA)
+  categoria     String           @db.VarChar(100)
+  canalOrigen   CanalAtencion    @map("canal_origen")
+  descripcion   String           @db.Text
+  resolucion    String?          @db.Text
+  escaladoA     Int?             @map("escalado_a")
+  fechaCreacion DateTime         @default(now()) @map("fecha_creacion") @db.Timestamptz
+  fechaCierre   DateTime?        @map("fecha_cierre") @db.Timestamptz
+  actualizadoEn DateTime         @updatedAt @map("actualizado_en") @db.Timestamptz
+
+  vecino        Vecino           @relation(fields: [idVecino], references: [idUsuario])
+  agente        Agente?          @relation(fields: [idAgente], references: [idUsuario])
+  supervisor    Supervisor?      @relation("TicketEscalado", fields: [escaladoA], references: [idUsuario])
+  comentarios   Comentario[]
+  adjuntos      Adjunto[]
+  encuesta      EncuestaSatisfaccion?
+  asignaciones  HistorialAsignacion[]
+
+  @@map("ticket")
+}
+
+// ─────────────────────────────────────────────
+// COMENTARIO — composición de Ticket
+// ─────────────────────────────────────────────
+
+model Comentario {
+  id          Int      @id @default(autoincrement())
+  idTicket    Int      @map("id_ticket")
+  idAutor     Int      @map("id_autor")
+  contenido   String   @db.Text
+  esInterno   Boolean  @default(false) @map("es_interno")
+  creadoEn    DateTime @default(now()) @map("creado_en") @db.Timestamptz
+
+  ticket      Ticket   @relation(fields: [idTicket], references: [id], onDelete: Cascade)
+
+  @@map("comentario")
+}
+
+// ─────────────────────────────────────────────
+// ADJUNTO — composición de Ticket
+// ─────────────────────────────────────────────
+
+model Adjunto {
+  id          Int      @id @default(autoincrement())
+  idTicket    Int      @map("id_ticket")
+  nombreArchivo String @map("nombre_archivo") @db.VarChar(255)
+  url         String   @db.VarChar(500)
+  tamanioKb   Int      @map("tamanio_kb")
+  creadoEn    DateTime @default(now()) @map("creado_en") @db.Timestamptz
+
+  ticket      Ticket   @relation(fields: [idTicket], references: [id], onDelete: Cascade)
+
+  @@map("adjunto")
+}
+
+// ─────────────────────────────────────────────
+// HISTORIAL DEL VECINO — DERCA-07
+// ─────────────────────────────────────────────
+
+model HistorialVecino {
+  id          Int            @id @default(autoincrement())
+  idVecino    Int            @unique @map("id_vecino")
+  vecino      Vecino         @relation(fields: [idVecino], references: [idUsuario])
+  interacciones Interaccion[]
+
+  @@map("historial_vecino")
+}
+
+model Interaccion {
+  id            Int             @id @default(autoincrement())
+  idHistorial   Int             @map("id_historial")
+  tipo          TipoInteraccion
+  descripcion   String          @db.Text
+  idAgente      Int?            @map("id_agente")
+  creadoEn      DateTime        @default(now()) @map("creado_en") @db.Timestamptz
+
+  historial     HistorialVecino @relation(fields: [idHistorial], references: [id])
+
+  @@map("interaccion")
+}
+
+// ─────────────────────────────────────────────
+// BASE DE CONOCIMIENTOS — DERCA-02
+// ─────────────────────────────────────────────
+
+model BaseConocimientos {
+  id          Int       @id @default(autoincrement())
+  nombre      String    @db.VarChar(150)
+  articulos   Articulo[]
+
+  @@map("base_conocimientos")
+}
+
+model Articulo {
+  id              Int               @id @default(autoincrement())
+  idBase          Int               @map("id_base")
+  titulo          String            @db.VarChar(200)
+  contenido       String            @db.Text
+  categoria       String            @db.VarChar(100)
+  version         Int               @default(1)
+  publicado       Boolean           @default(false)
+  vistas          Int               @default(0)
+  calificaciones  Int               @default(0) @map("calificaciones_utiles")
+  idAutor         Int               @map("id_autor")
+  creadoEn        DateTime          @default(now()) @map("creado_en") @db.Timestamptz
+  actualizadoEn   DateTime          @updatedAt @map("actualizado_en") @db.Timestamptz
+
+  base            BaseConocimientos @relation(fields: [idBase], references: [id])
+
+  @@map("articulo")
+}
+
+// ─────────────────────────────────────────────
+// ENCUESTA DE SATISFACCIÓN — DERCA-03
+// ─────────────────────────────────────────────
+
+model EncuestaSatisfaccion {
+  id          Int       @id @default(autoincrement())
+  idTicket    Int       @unique @map("id_ticket")
+  csat        Int?      // 1–5
+  nps         Int?      // 0–10
+  ces         Int?      // 1–7
+  comentario  String?   @db.Text
+  respondida  Boolean   @default(false)
+  enviadaEn   DateTime  @default(now()) @map("enviada_en") @db.Timestamptz
+  respondidaEn DateTime? @map("respondida_en") @db.Timestamptz
+
+  ticket      Ticket    @relation(fields: [idTicket], references: [id], onDelete: Cascade)
+
+  @@map("encuesta_satisfaccion")
+}
+
+// ─────────────────────────────────────────────
+// HISTORIAL DE ASIGNACIONES — DERCA-06
+// ─────────────────────────────────────────────
+
+model HistorialAsignacion {
+  id            Int      @id @default(autoincrement())
+  idTicket      Int      @map("id_ticket")
+  idAgente      Int      @map("id_agente")
+  asignadoPor   Int      @map("asignado_por")
+  motivo        String?  @db.VarChar(255)
+  creadoEn      DateTime @default(now()) @map("creado_en") @db.Timestamptz
+
+  ticket        Ticket   @relation(fields: [idTicket], references: [id], onDelete: Cascade)
+
+  @@map("historial_asignacion")
+}
+
+// ─────────────────────────────────────────────
+// REGLAS DE ASIGNACIÓN — DERCA-05
+// ─────────────────────────────────────────────
+
+model ReglaAsignacion {
+  id            Int      @id @default(autoincrement())
+  nombre        String   @db.VarChar(100)
+  descripcion   String?  @db.VarChar(255)
+  criterio      String   @db.VarChar(100)  // 'especialidad' | 'zona' | 'carga' | 'prioridad'
+  valor         String   @db.VarChar(100)
+  prioridad     Int      @default(1)
+  activa        Boolean  @default(true)
+  creadoEn      DateTime @default(now()) @map("creado_en") @db.Timestamptz
+
+  @@map("regla_asignacion")
+}
+
+// ─────────────────────────────────────────────
+// NEXTAUTH — tablas requeridas por @auth/prisma-adapter
+// ─────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            Int     @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user              Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("account")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       Int      @map("user_id")
+  expires      DateTime
+
+  user         Usuario  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_token")
+}

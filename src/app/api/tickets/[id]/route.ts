@@ -38,6 +38,7 @@ export async function GET(
 }
 
 // PATCH /api/tickets/[id] — actualizar estado, prioridad, agente, resolución
+// PATCH /api/tickets/[id]
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -60,6 +61,15 @@ export async function PATCH(
     where: { id: Number(id) },
     data,
   });
+
+  // Crear encuesta automáticamente al cerrar
+  if (estado === "CERRADO") {
+    await prisma.encuestaSatisfaccion.upsert({
+      where: { idTicket: ticket.id },
+      create: { idTicket: ticket.id },
+      update: {},
+    });
+  }
 
   return NextResponse.json(ticket);
 }

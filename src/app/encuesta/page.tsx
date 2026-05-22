@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function EncuestaPage() {
+// 1. Trasladamos toda la lógica y diseño a un componente interno
+function EncuestaForm() {
   const searchParams = useSearchParams();
   const idTicket = searchParams.get("ticket");
   const [encuesta, setEncuesta] = useState<any>(null);
@@ -180,7 +181,7 @@ export default function EncuestaPage() {
                 </div>
               </div>
 
-              <div className="px-6 pb-6">
+              <div className="p-6 pt-0">
                 <button
                   type="submit"
                   disabled={csat === 0 || enviando}
@@ -209,5 +210,18 @@ export default function EncuestaPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// 2. El export por defecto solo envuelve al formulario en un Suspense boundary
+export default function EncuestaPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#f5f7fa] flex items-center justify-center p-4">
+        <div className="text-gray-500 text-sm animate-pulse">Cargando formulario...</div>
+      </div>
+    }>
+      <EncuestaForm />
+    </Suspense>
   );
 }

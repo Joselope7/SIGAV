@@ -39,6 +39,7 @@ export async function GET(
 
 // PATCH /api/tickets/[id] — actualizar estado, prioridad, agente, resolución
 // PATCH /api/tickets/[id]
+// PATCH /api/tickets/[id] — actualizar estado, prioridad, agente, resolución
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -56,6 +57,22 @@ export async function PATCH(
   if (idAgente !== undefined) data.idAgente = idAgente;
   if (resolucion) data.resolucion = resolucion;
   if (estado === "CERRADO") data.fechaCierre = new Date();
+  if (estado === "EN_PROGRESO" && !idAgente && session.user?.email) {
+    // Buscamos el registro del Agente usando el correo de la sesión actual
+    const agenteLogueado = await prisma.agente.findFirst({
+      where: {
+        usuario: {
+          correo: session.user.email // o session.user.id si guardas el ID de usuario en NextAuth
+        }
+      }
+    });
+
+    // Si encontramos al agente asignado a este usuario, lo vinculamos al ticket
+    if (agenteLogueado) {
+      data.idAgente = agenteLogueado.idUsuario;
+    }
+  }
+  // ========================================================
 
   const ticket = await prisma.ticket.update({
     where: { id: Number(id) },

@@ -85,10 +85,10 @@ export default function TicketDetallePage() {
     await fetch(`/api/tickets/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ estado }),
+      body: JSON.stringify({ estado }), // Simplemente mandas "EN_PROGRESO"
     });
     setActualizando(false);
-    fetchTicket();
+    fetchTicket(); // Al recargar, el backend ya habrá inyectado el agente
   }
 
   if (loading) {
@@ -149,6 +149,7 @@ export default function TicketDetallePage() {
               {ticket.estado === "ABIERTO" && (
                 <button
                   onClick={() => actualizarEstado("EN_PROGRESO")}
+
                   disabled={actualizando}
                   className="text-xs font-medium px-3 py-2 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-xl hover:bg-yellow-100 transition disabled:opacity-50"
                 >
